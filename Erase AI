@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>AI Smart Object Eraser Pro</title>
+    <style>
+        :root {
+            --bg: #09090b;
+            --surface: #18181b;
+            --surface-hover: #27272a;
+            --accent: #2563eb;
+            --text: #ffffff;
+            --text-muted: #71717a;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: system-ui, -apple-system, sans-serif; }
+        body { background-color: var(--bg); color: var(--text); min-height: 100vh; display: flex; flex-direction: column; align-items: center; padding: 16px; }
+        .app-bar { width: 100%; max-width: 500px; background: var(--surface); padding: 16px; text-align: center; border-radius: 12px; margin-bottom: 16px; border: 1px solid #27272a; }
+        .app-bar h1 { font-size: 1.3rem; font-weight: 700; background: linear-gradient(to right, #3b82f6, #a855f7); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        .workspace { position: relative; background: #000; border-radius: 16px; border: 2px dashed #3f3f46; width: 100%; max-width: 500px; min-height: 380px; display: flex; justify-content: center; align-items: center; overflow: hidden; }
+        .workspace.loaded { border: none; }
+        #imgContainer { position: relative; display: none; width: 100%; touch-action: none; }
+        #srcImage { width: 100%; display: block; pointer-events: none; }
+        #drawCanvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; cursor: crosshair; }
+        .upload-trigger { padding: 40px 20px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 12px; width: 100%; cursor: pointer; }
+        .upload-btn { background: var(--accent); color: white; padding: 14px 24px; border-radius: 12px; font-weight: 600; display: inline-block; pointer-events: none; }
+        .control-panel { width: 100%; max-width: 500px; background: var(--surface); border-radius: 16px; padding: 16px; margin-top: 16px; display: flex; flex-direction: column; gap: 12px; }
+        .slider-group { display: flex; align-items: center; gap: 12px; background: #09090b; padding: 12px; border-radius: 12px; }
+        .slider-group label { font-size: 0.8rem; color: var(--text-muted); font-weight: bold; min-width: 80px; }
+        .slider-group input { flex: 1; accent-color: var(--accent); }
+        .action-row { display: flex; gap: 8px; }
+        .btn { flex: 1; background: var(--surface-hover); color: var(--text); border: 1px solid #3f3f46; padding: 14px; border-radius: 10px; font-weight: 600; font-size: 0.9rem; cursor: pointer; }
+        .btn-primary { background: var(--accent); border: none; }
+        .btn-success { background: #10b981; border: none; }
+        #fileInput { display: none; }
+        .export-modal { position: fixed; inset: 0; background: rgba(9,9,11,0.95); z-index: 2000; display: none; flex-direction: column; align-items: center; justify-content: center; padding: 20px; }
+        .export-modal.active { display: flex; }
+        .export-preview { max-width: 100%; max-height: 70vh; border-radius: 12px; border: 2px solid #27272a; }
+    </style>
+</head>
+<body>
+
+    <div class="app-bar">
+        <h1>ANDROID 16 AI CLEANUP ENGINE</h1>
+    </div>
+
+    <div class="workspace" id="mainWorkspace" onclick="document.getElementById('fileInput').click();">
+        <div class="upload-trigger" id="uploadStage">
+            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#2563eb" stroke-width="2"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>
+            <p style="color: var(--text-muted); margin-bottom: 8px;">Select a photo from your Android Storage</p>
+            <div class="upload-btn">Choose Image File</div>
+        </div>
+
+        <div id="imgContainer" onclick="event.stopPropagation();">
+            <img id="srcImage" alt="Target Canvas">
+            <canvas id="drawCanvas"></canvas>
+        </div>
+    </div>
+
+    <div class="control-panel">
+        <div class="slider-group">
+            <label>BRUSH SIZE</label>
+            <input type="range" id="brushSize" min="8" max="60" value="25">
+        </div>
+        <div class="action-row">
+            <button class="btn" id="clearBtn">Clear</button>
+            <button class="btn btn-primary" id="eraseBtn">Erase Selected</button>
+            <button class="btn btn-success" id="saveBtn">Save Image</button>
+        </div>
+    </div>
+
+    <input type="file" id="fileInput" accept="image/*">
+
+    <div class="export-modal" id="exportModal">
+        <p style="margin-bottom: 16px; font-weight: 600; text-align: center;">👇 Press and hold the image below to save it to your Gallery 👇</p>
+        <img class="export-preview" id="exportPreview" alt="Output Result">
+        <button class="btn" style="margin-top: 24px; max-width: 200px; background: #dc2626; border: none;" onclick="document.getElementById('exportModal').classList.remove('active');">Close Preview</button>
+    </div>
+
+    <script>
+        (function() {
+            let drawCanvas, dCtx, maskCanvas, maskCtx;
+            let isDrawing = false;
+            let imgTag = document.getElementById('srcImage');
+            maskCanvas = document.createElement('canvas');
+            maskCtx = maskCanvas.getContext('2d');
+
+            document.getElementById('fileInput').addEventListener('change', function(e) {
+                if (!this.files || this.files.length === 0) return;
+                drawCanvas = document.getElementById('drawCanvas');
+                dCtx = drawCanvas.getContext('2d');
+                
+                let reader = new FileReader();
+                reader.onload = function(event) {
+                    imgTag.onload = function() {
+                        let w = imgTag.clientWidth;
+                        let h = imgTag.clientHeight;
+                        drawCanvas.width = w; drawCanvas.height = h;
+                        maskCanvas.width = w; maskCanvas.height = h;
+                        dCtx.clearRect(0, 0, w, h);
+                        maskCtx.fillStyle = 'black'; maskCtx.fillRect(0, 0, w, h);
+                        document.getElementById('uploadStage').style.display = 'none';
+                        document.getElementById('imgContainer').style.display = 'block';
+                        document.getElementById('mainWorkspace').classList.add('loaded');
+                        setupInteractionListeners();
+                    };
+                    imgTag.src = event.target.result;
+                };
+                reader.readAsDataURL(this.files[0]);
+            });
+
+            function setupInteractionListeners() {
+                const getCoords = (e) => {
+                    let rect = drawCanvas.getBoundingClientRect();
+                    let clientX = e.touches ? e.touches[0].clientX : e.clientX;
+                    let clientY = e.touches ? e.touches[0].clientY : e.clientY;
+                    return { x: clientX - rect.left, y: clientY - rect.top };
+                };
+                const start = (e) => { isDrawing = true; let pos = getCoords(e); dCtx.beginPath(); dCtx.moveTo(pos.x, pos.y); maskCtx.beginPath(); maskCtx.moveTo(pos.x, pos.y); };
+                const move = (e) => {
+                    if (!isDrawing) return;
+                    if (e.touches) e.preventDefault();
+                    let pos = getCoords(e);
+                    let rad = parseInt(document.getElementById('brushSize').value, 10);
+                    dCtx.lineWidth = rad; dCtx.lineCap = 'round'; dCtx.lineJoin = 'round'; dCtx.strokeStyle = 'rgba(239, 68, 68, 0.5)'; dCtx.lineTo(pos.x, pos.y); dCtx.stroke();
+                    maskCtx.lineWidth = rad; maskCtx.lineCap = 'round'; maskCtx.lineJoin = 'round'; maskCtx.strokeStyle = 'white'; maskCtx.lineTo(pos.x, pos.y); maskCtx.stroke();
+                };
+                const stop = () => { isDrawing = false; };
+                drawCanvas.addEventListener('mousedown', start); drawCanvas.addEventListener('mousemove', move); window.addEventListener('mouseup', stop);
+                drawCanvas.addEventListener('touchstart', start); drawCanvas.addEventListener('touchmove', move, { passive: false }); window.addEventListener('touchend', stop);
+            }
+
+            document.getElementById('clearBtn').addEventListener('click', function() {
+                dCtx.clearRect(0, 0, drawCanvas.width, drawCanvas.height);
+                maskCtx.fillStyle = 'black'; maskCtx.fillRect(0, 0, maskCanvas.width, maskCanvas.height);
+            });
+
+            document.getElementById('eraseBtn').addEventListener('click', function() {
+                let w = drawCanvas.width; let h = drawCanvas.height;
+                let compCanvas = document.createElement('canvas'); compCanvas.width = w; compCanvas.height = h;
+                let cCtx = compCanvas.getContext('2d'); cCtx.drawImage(imgTag, 0, 0, w, h);
+                let sceneData = cCtx.getImageData(0, 0, w, h); let selectionMap = maskCtx.getImageData(0, 0, w, h);
+                let outData = cCtx.createImageData(w, h); outData.data.set(sceneData.data);
+
+                for (let y = 0; y < h; y++) {
+                    for (let x = 0; x < w; x++) {
+                        let i = (y * w + x) * 4;
+                        if (selectionMap.data[i] > 100) { 
+                            let done = false; let r = 1; let maxR = Math.max(w, h);
+                            while (!done && r < maxR) {
+                                let scan = [{x: -r, y: 0}, {x: r, y: 0}, {x: 0, y: -r}, {x: 0, y: r}];
+                                for (let edge of scan) {
+                                    let cx = x + edge.x; let cy = y + edge.y;
+                                    if (cx >= 0 && cx < w && cy >= 0 && cy < h) {
